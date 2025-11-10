@@ -7,3 +7,4 @@
 "services/vanna/__pycache__/" 
 "apps/api/prisma/migrations/" 
 node_modules
+"services/vanna/.env" 
