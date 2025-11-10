@@ -90,7 +90,6 @@ async def generate_sql(request: Request):
         WHERE status ILIKE '%pending%' OR status ILIKE '%overdue%';
         """
 
-    # Show all processed invoices this month
     elif "processed" in query and ("this month" in query or "current month" in query):
         sql = """
         SELECT "invoiceNo", date, amount, status
@@ -100,7 +99,6 @@ async def generate_sql(request: Request):
         ORDER BY date DESC;
         """
 
-    # Compare spend by vendor this quarter
     elif "compare" in query and "vendor" in query and "quarter" in query:
         sql = """
         SELECT 
@@ -113,7 +111,6 @@ async def generate_sql(request: Request):
         ORDER BY total_spend DESC;
         """
 
-    # Show invoices above a certain amount
     elif "above" in query and "invoice" in query:
         amount_match = re.search(r'\b(\d{3,6})\b', query)
         threshold = amount_match.group(1) if amount_match else "1000"
@@ -124,7 +121,6 @@ async def generate_sql(request: Request):
         ORDER BY amount DESC;
         """
 
-    # Show total pending amount
     elif "total pending" in query or "pending amount" in query:
         sql = """
         SELECT SUM(amount) AS total_pending_amount
@@ -132,7 +128,6 @@ async def generate_sql(request: Request):
         WHERE status ILIKE '%pending%';
         """
 
-    # Vendor-wise invoice count
     elif "invoice count" in query and "vendor" in query:
         sql = """
         SELECT 
@@ -144,7 +139,6 @@ async def generate_sql(request: Request):
         ORDER BY invoice_count DESC;
         """
 
-    # Spend by category this year
     elif "category" in query and "this year" in query:
         sql = """
         SELECT 
@@ -202,6 +196,8 @@ Return **only** SQL code (no explanations).
         print("❌ SQL Execution Error:", e)
         return {"query": query, "sql": sql, "error": str(e)}
 
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
