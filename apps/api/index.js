@@ -13,6 +13,33 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
+// ✅ Root route — to verify the API is running
+app.get("/", (req, res) => {
+  res.json({
+    message: "🚀 Flowbit API is running successfully!",
+    endpoints: [
+      "/stats",
+      "/invoice-trends",
+      "/vendors/top10",
+      "/category-spend",
+      "/cash-outflow",
+      "/invoices",
+      "/chat-with-data",
+      "/health"
+    ],
+  });
+});
+
+// ✅ Health check route — checks DB connectivity
+app.get("/health", async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: "ok", db: "connected" });
+  } catch (err) {
+    res.status(500).json({ status: "error", db: "disconnected", error: err.message });
+  }
+});
+
 // ---- /stats
 app.get("/stats", async (req, res) => {
   try {
@@ -20,7 +47,6 @@ app.get("/stats", async (req, res) => {
     const totalSpend = totalSpendAgg._sum.amount ?? 0;
 
     const totalInvoices = await prisma.invoice.count();
-
     const documentsUploaded = await prisma.invoice.count();
 
     const avgAgg = await prisma.invoice.aggregate({ _avg: { amount: true } });
@@ -68,7 +94,7 @@ app.get("/vendors/top10", async (req, res) => {
       category: v.category,
       totalAmount: v.invoices.reduce((s, i) => s + (i.amount ?? 0), 0),
     }));
-    arr.sort((a,b) => b.totalAmount - a.totalAmount);
+    arr.sort((a, b) => b.totalAmount - a.totalAmount);
     res.json(arr.slice(0, 10));
   } catch (err) {
     console.error(err);
@@ -98,9 +124,7 @@ app.get("/category-spend", async (req, res) => {
 app.get("/cash-outflow", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    const where = {
-      amount: { lt: 0 },
-    };
+    const where = { amount: { lt: 0 } };
     if (startDate || endDate) {
       where.date = {};
       if (startDate) where.date.gte = new Date(startDate);
@@ -110,7 +134,7 @@ app.get("/cash-outflow", async (req, res) => {
     const byMonth = {};
     for (const inv of invoices) {
       const d = new Date(inv.date);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,"0")}`;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       byMonth[key] = (byMonth[key] ?? 0) + Math.abs(inv.amount ?? 0);
     }
     const result = Object.keys(byMonth).sort().map(k => ({ month: k, outflow: byMonth[k] }));
@@ -121,23 +145,18 @@ app.get("/cash-outflow", async (req, res) => {
   }
 });
 
-// ---- /invoices with filters/search/pagination
+// ---- /invoices (filters/search/pagination)
 app.get("/invoices", async (req, res) => {
   try {
     const { search, status, vendorName, sortBy, sortOrder, page = 1, limit = 20 } = req.query;
     const where = {};
-
-    // Optional: Role-based visibility
     const { role } = req.query;
 
     if (role === "Analyst") {
-    // Analysts only see processed invoices
-     where.status = "Processed";
-}   else if (role === "Intern") {
-    // Interns only see their vendor subset
-     where.vendor = { name: { contains: "Vendor", mode: "insensitive" } };
-}
-// Managers or Admins see everything (default)
+      where.status = "Processed";
+    } else if (role === "Intern") {
+      where.vendor = { name: { contains: "Vendor", mode: "insensitive" } };
+    }
 
     if (status) where.status = status;
     if (vendorName) where.vendor = { name: { contains: vendorName, mode: "insensitive" } };
@@ -148,7 +167,7 @@ app.get("/invoices", async (req, res) => {
     const skip = (pageInt - 1) * limitInt;
 
     const orderBy = {};
-    if (sortBy) orderBy[sortBy] = (sortOrder === "desc" ? "desc" : "asc");
+    if (sortBy) orderBy[sortBy] = sortOrder === "desc" ? "desc" : "asc";
     else orderBy.date = "desc";
 
     const invoices = await prisma.invoice.findMany({
@@ -160,7 +179,6 @@ app.get("/invoices", async (req, res) => {
     });
 
     const totalCount = await prisma.invoice.count({ where });
-
     res.json({ invoices, totalCount });
   } catch (err) {
     console.error(err);
@@ -174,30 +192,20 @@ app.post("/chat-with-data", async (req, res) => {
     const { query } = req.body;
     if (!query) return res.status(400).json({ message: "Query required" });
 
-    // Connect directly to your Vanna FastAPI server
     const VANNA_URL = process.env.VANNA_API_BASE_URL || "http://localhost:8000";
-
     const vannaResp = await axios.post(`${VANNA_URL}/generate-sql`, { query });
 
-    // Extract SQL + results from Vanna’s response
     const { sql, result, error } = vannaResp.data;
+    if (error) return res.status(500).json({ query, sql, error });
 
-    if (error) {
-      return res.status(500).json({ query, sql, error });
-    }
-
-    return res.json({
-      query,
-      sql,
-      result,
-    });
+    res.json({ query, sql, result });
   } catch (err) {
     console.error("❌ Chat-with-data error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-
+// Local development only
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => console.log(`🚀 API server running locally on port ${PORT}`));
