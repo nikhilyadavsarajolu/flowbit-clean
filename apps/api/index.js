@@ -198,5 +198,9 @@ app.post("/chat-with-data", async (req, res) => {
 });
 
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🚀 API server running on port ${PORT}`));
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => console.log(`🚀 API server running locally on port ${PORT}`));
+}
+
+export default app;
