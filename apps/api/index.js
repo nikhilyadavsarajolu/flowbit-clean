@@ -10,13 +10,21 @@ dotenv.config();
 const app = express();
 const prisma = new PrismaClient();
 
-app.use(cors());
+// ✅ Configure CORS (for frontend + Vanna AI)
+app.use(
+  cors({
+    origin: ["*", "https://flowbit-frontend-8qnu.vercel.app"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 app.use(express.json());
 
-// ✅ Root route — to verify the API is running
+// ✅ Root route — to verify API is working
 app.get("/", (req, res) => {
   res.json({
-    message: "🚀 Flowbit API is running successfully!",
+    message: "🚀 Flowbit API running successfully!",
     endpoints: [
       "/stats",
       "/invoice-trends",
@@ -25,12 +33,12 @@ app.get("/", (req, res) => {
       "/cash-outflow",
       "/invoices",
       "/chat-with-data",
-      "/health"
+      "/health",
     ],
   });
 });
 
-// ✅ Health check route — checks DB connectivity
+// ✅ Health check (for monitoring)
 app.get("/health", async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -47,24 +55,19 @@ app.get("/stats", async (req, res) => {
     const totalSpend = totalSpendAgg._sum.amount ?? 0;
 
     const totalInvoices = await prisma.invoice.count();
-    const documentsUploaded = await prisma.invoice.count();
+    const documentsUploaded = totalInvoices;
 
     const avgAgg = await prisma.invoice.aggregate({ _avg: { amount: true } });
     const averageInvoiceValue = avgAgg._avg.amount ?? 0;
 
-    res.json({
-      totalSpend,
-      totalInvoices,
-      documentsUploaded,
-      averageInvoiceValue,
-    });
+    res.json({ totalSpend, totalInvoices, documentsUploaded, averageInvoiceValue });
   } catch (err) {
-    console.error(err);
+    console.error("❌ /stats error:", err);
     res.status(500).json({ error: "server error", details: err.message });
   }
 });
 
-// ---- /invoice-trends (monthly counts & spend)
+// ---- /invoice-trends
 app.get("/invoice-trends", async (req, res) => {
   try {
     const invoices = await prisma.invoice.findMany({ select: { date: true, amount: true } });
@@ -74,12 +77,12 @@ app.get("/invoice-trends", async (req, res) => {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       if (!map[key]) map[key] = { invoiceCount: 0, totalAmount: 0 };
       map[key].invoiceCount++;
-      map[key].totalAmount += (inv.amount ?? 0);
+      map[key].totalAmount += inv.amount ?? 0;
     }
-    const result = Object.keys(map).sort().map(k => ({ month: k, ...map[k] }));
+    const result = Object.keys(map).sort().map((k) => ({ month: k, ...map[k] }));
     res.json(result);
   } catch (err) {
-    console.error(err);
+    console.error("❌ /invoice-trends error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -88,7 +91,7 @@ app.get("/invoice-trends", async (req, res) => {
 app.get("/vendors/top10", async (req, res) => {
   try {
     const vendors = await prisma.vendor.findMany({ include: { invoices: true } });
-    const arr = vendors.map(v => ({
+    const arr = vendors.map((v) => ({
       id: v.id,
       name: v.name,
       category: v.category,
@@ -97,7 +100,7 @@ app.get("/vendors/top10", async (req, res) => {
     arr.sort((a, b) => b.totalAmount - a.totalAmount);
     res.json(arr.slice(0, 10));
   } catch (err) {
-    console.error(err);
+    console.error("❌ /vendors/top10 error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -112,10 +115,10 @@ app.get("/category-spend", async (req, res) => {
       const cat = v.category ?? "Uncategorized";
       byCat[cat] = (byCat[cat] ?? 0) + total;
     }
-    const result = Object.keys(byCat).map(k => ({ category: k, totalAmount: byCat[k] }));
+    const result = Object.keys(byCat).map((k) => ({ category: k, totalAmount: byCat[k] }));
     res.json(result);
   } catch (err) {
-    console.error(err);
+    console.error("❌ /category-spend error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -137,20 +140,19 @@ app.get("/cash-outflow", async (req, res) => {
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       byMonth[key] = (byMonth[key] ?? 0) + Math.abs(inv.amount ?? 0);
     }
-    const result = Object.keys(byMonth).sort().map(k => ({ month: k, outflow: byMonth[k] }));
+    const result = Object.keys(byMonth).sort().map((k) => ({ month: k, outflow: byMonth[k] }));
     res.json(result);
   } catch (err) {
-    console.error(err);
+    console.error("❌ /cash-outflow error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---- /invoices (filters/search/pagination)
+// ---- /invoices
 app.get("/invoices", async (req, res) => {
   try {
-    const { search, status, vendorName, sortBy, sortOrder, page = 1, limit = 20 } = req.query;
+    const { search, status, vendorName, sortBy, sortOrder, page = 1, limit = 20, role } = req.query;
     const where = {};
-    const { role } = req.query;
 
     if (role === "Analyst") {
       where.status = "Processed";
@@ -181,31 +183,43 @@ app.get("/invoices", async (req, res) => {
     const totalCount = await prisma.invoice.count({ where });
     res.json({ invoices, totalCount });
   } catch (err) {
-    console.error(err);
+    console.error("❌ /invoices error:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---- /chat-with-data (proxy to Vanna)
+// ---- /chat-with-data (proxy to Vanna AI)
 app.post("/chat-with-data", async (req, res) => {
-  try {
-    const { query } = req.body;
-    if (!query) return res.status(400).json({ message: "Query required" });
+  const { query } = req.body;
+  if (!query) return res.status(400).json({ message: "Query required" });
 
-    const VANNA_URL = process.env.VANNA_API_BASE_URL || "http://localhost:8000";
-    const vannaResp = await axios.post(`${VANNA_URL}/generate-sql`, { query });
+  const VANNA_URL = process.env.VANNA_API_BASE_URL || "http://localhost:8000";
+  console.log("🔗 Connecting to Vanna at:", VANNA_URL);
+
+  try {
+    const vannaResp = await axios.post(
+      `${VANNA_URL}/generate-sql`,
+      { query },
+      { headers: { "Content-Type": "application/json" }, timeout: 20000 }
+    );
 
     const { sql, result, error } = vannaResp.data;
-    if (error) return res.status(500).json({ query, sql, error });
+    if (error) {
+      console.error("❌ Vanna returned error:", error);
+      return res.status(500).json({ query, sql, error });
+    }
 
     res.json({ query, sql, result });
-  } catch (err) {
-    console.error("❌ Chat-with-data error:", err.message);
-    res.status(500).json({ error: err.message });
+  } catch (apiErr) {
+    console.error("❌ Error reaching Vanna AI:", apiErr.message);
+    res.status(500).json({
+      error: "Failed to reach Vanna AI server",
+      details: apiErr.message,
+    });
   }
 });
 
-// Local development only
+// ✅ Local dev mode
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 3001;
   app.listen(PORT, () => console.log(`🚀 API server running locally on port ${PORT}`));
